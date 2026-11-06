@@ -62,6 +62,7 @@ def _test_external_success(simulation_app, mode):
     env = IsaacLabArenaManagerBasedRLEnv.__new__(IsaacLabArenaManagerBasedRLEnv)
     env.cfg = SimpleNamespace(
         scene=SimpleNamespace(num_envs=2),
+        auto_reset=True,
         sim=SimpleNamespace(device="cpu"),
         terminations=termination_cfg,
         recorders=recorder_cfg,

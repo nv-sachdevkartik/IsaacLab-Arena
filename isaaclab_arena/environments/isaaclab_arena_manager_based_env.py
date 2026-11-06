@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import gymnasium as gym
 import torch
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
@@ -62,6 +63,9 @@ class IsaacLabArenaManagerBasedRLEnv(ManagerBasedRLEnv):
             variation_recorder.bind_env(self)
         self._episode_indices: dict[int, int] = {}
         self._episode_limit: int | None = None
+        self._explicit_reset = False
+        if not cfg.auto_reset:
+            self.metadata = {**self.metadata, "autoreset_mode": gym.vector.AutoresetMode.DISABLED}
         self._started_episode_count = 0
         self._completed_episode_count = 0
         self._active_episode_mask = torch.zeros(cfg.scene.num_envs, dtype=torch.bool, device=cfg.sim.device)
@@ -169,6 +173,7 @@ class IsaacLabArenaManagerBasedRLEnv(ManagerBasedRLEnv):
         Args:
             num_episodes: Positive episode budget shared by all environments.
         """
+        assert self.cfg.auto_reset, "Episode limits require automatic replacement episodes."
         assert self._started_episode_count == 0, "Configure the episode limit before the initial reset."
         assert num_episodes > 0, "The episode limit must be positive."
         self._episode_limit = num_episodes
@@ -185,7 +190,11 @@ class IsaacLabArenaManagerBasedRLEnv(ManagerBasedRLEnv):
             self._episode_limit is None or self._started_episode_count == 0
         ), "Episode-limited rollouts use one initial reset and automatic replacements during step()."
         self._reset_env_ids = self._reset_env_ids[:0]
-        return super().reset(seed=seed, env_ids=env_ids, options=options)
+        self._explicit_reset = True
+        try:
+            return super().reset(seed=seed, env_ids=env_ids, options=options)
+        finally:
+            self._explicit_reset = False
 
     def step(self, action: torch.Tensor) -> VecEnvStepReturn:
         """Step all environments and report completions only for assigned episodes."""
@@ -211,6 +220,9 @@ class IsaacLabArenaManagerBasedRLEnv(ManagerBasedRLEnv):
                 self._variation_replay_scheduler.complete_episodes(finishing_env_ids.tolist())
             self._completed_episode_count += len(finishing_env_ids)
             self._active_episode_mask[finishing_env_ids] = False
+
+        if not self.cfg.auto_reset and not self._explicit_reset:
+            return
 
         episode_start_env_ids = requested_env_ids
         if self._episode_limit is not None:
