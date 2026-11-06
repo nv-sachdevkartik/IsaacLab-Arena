@@ -26,6 +26,7 @@ def _create_episode_limit_env(
     episode_lengths,
     record_trajectories,
     recorded_variation_samples_path=None,
+    auto_reset=True,
 ):
     import torch
     from dataclasses import field
@@ -118,6 +119,7 @@ def _create_episode_limit_env(
         ),
     )
     env_cfg, env_kwargs = builder.build_env_cfg()
+    env_cfg.auto_reset = auto_reset
     env_cfg.decimation = 2
     env_cfg.sim.render_interval = 2
     env_cfg.events = combine_configclass_instances("EpisodeLimitEventsCfg", env_cfg.events, EpisodeLimitEventsCfg())
@@ -353,3 +355,54 @@ def _test_unbounded_partial_initial_reset(simulation_app, output_dir):
 
 def test_unbounded_partial_initial_reset(tmp_path):
     assert run_function_with_persistent_simulation_app(_test_unbounded_partial_initial_reset, output_dir=tmp_path)
+
+
+def _test_explicit_resets(simulation_app, output_dir):
+    import gymnasium as gym
+    import torch
+    from unittest.mock import patch
+
+    from isaaclab.envs import ManagerBasedRLEnv
+
+    env, started, results_path = _create_episode_limit_env(
+        output_dir, (2, 3), record_trajectories=False, auto_reset=False
+    )
+    raw = env.unwrapped
+    try:
+        assert raw.metadata["autoreset_mode"] is gym.vector.AutoresetMode.DISABLED
+        with pytest.raises(AssertionError, match="automatic replacement"):
+            raw.configure_episode_limit(2)
+        env.reset(seed=11)
+        actions = torch.zeros(raw.action_space.shape, device=raw.device)
+        endings = []
+        for _ in range(5):
+            _, _, terminated, truncated, _ = env.step(actions)
+            endings.append((terminated.tolist(), truncated.tolist()))
+        assert started == [(0, 0), (1, 0)]
+        assert raw.completed_episode_count == 2
+        assert not raw.active_episode_mask.any()
+        assert endings[1] == ([True, False], [False, False])
+        assert endings[2] == ([False, False], [False, True])
+        assert endings[3:] == [([False, False], [False, False])] * 2
+        records = [json.loads(line) for line in results_path.read_text().splitlines()]
+        assert len(records) == 2
+        for index, seed in enumerate((21, 22)):
+            raw.reset(env_ids=torch.tensor([index], device=raw.device), seed=seed)
+        assert started == [(0, 0), (1, 0), (0, 1), (1, 1)]
+        assert raw.active_episode_mask.all()
+        assert not raw._explicit_reset
+        for _ in range(3):
+            env.step(actions)
+        assert raw.completed_episode_count == 4
+        assert len(results_path.read_text().splitlines()) == 4
+        with patch.object(ManagerBasedRLEnv, "reset", side_effect=RuntimeError("reset failed")):
+            with pytest.raises(RuntimeError, match="reset failed"):
+                raw.reset(seed=31)
+        assert not raw._explicit_reset
+    finally:
+        env.close()
+    return True
+
+
+def test_explicit_resets(tmp_path):
+    assert run_function_with_persistent_simulation_app(_test_explicit_resets, output_dir=tmp_path)

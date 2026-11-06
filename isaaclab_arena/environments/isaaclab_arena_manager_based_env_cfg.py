@@ -164,6 +164,9 @@ class IsaacLabArenaManagerBasedRLEnvCfg(ManagerBasedRLEnvCfg):
     # terminations: object
     # recorders: object
 
+    auto_reset: bool = True
+    """Start a replacement episode when a slot finishes; false requires an explicit reset."""
+
     # Kill the unused managers
     commands = None
     rewards = None

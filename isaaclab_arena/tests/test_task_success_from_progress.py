@@ -67,6 +67,7 @@ def _make_environment_and_manager(
     env._reset_env_ids = torch.empty(0, dtype=torch.long)
     env._episode_indices = {0: 0, 1: 0}
     env._episode_limit = None
+    env.cfg = SimpleNamespace(auto_reset=True)
     env._started_episode_count = 2
     env._completed_episode_count = 0
     env._variation_recorder = None
