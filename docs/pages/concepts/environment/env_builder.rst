@@ -132,6 +132,44 @@ Pass the seed you want to lock on the runner CLI (or set the matching field on
 The compiled config is then registered with the gym registry under the
 environment's name, and ``gym.make()`` returns the gym environment.
 
+Explicit episode resets
+-----------------------
+
+By default, ``IsaacLabArenaManagerBasedRLEnvCfg.auto_reset`` is ``True``: an
+ended episode is replaced automatically during ``step()``. Set it to ``False``
+when the caller must decide when each native batch slot starts its next episode.
+Configure this before creating the environment:
+
+.. code-block:: python
+
+   cfg, kwargs = env_builder.build_env_cfg()
+   cfg.auto_reset = False
+   registered_env = env_builder.make_registered(cfg, kwargs)
+   native_env = registered_env.unwrapped
+
+   observations, info = native_env.reset(seed=42)
+   # After stepping with task-compatible actions, reset only the completed slots.
+   observations, info = native_env.reset(env_ids=[0], seed=43)
+   native_env.close()
+
+``make_registered()`` returns a Gym wrapper whose ``reset()`` does not accept
+``env_ids``. Use the underlying native environment consistently for reset and
+step when implementing this lifecycle; do not bypass the wrapper for reset and
+then call its reset-enforcing ``step()``.
+
+With automatic reset disabled, each completion is recorded once and no replacement
+episode starts until an explicit reset. The environment advertises disabled
+autoreset metadata. ``configure_episode_limit()`` requires automatic replacements
+and cannot be combined with this mode.
+
+.. note::
+
+   Disabling replacement episodes does not freeze completed bodies in the shared
+   physics world. A vector adapter that promises persistent terminal observations
+   must retain the first terminal observation and outcome itself while peers step.
+   A selected reset applies its seed to that call; it does not create independent
+   random streams for all subsequent simulation events.
+
 Mimic mode
 ----------
 
